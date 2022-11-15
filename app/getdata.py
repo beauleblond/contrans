@@ -4,7 +4,6 @@ import requests
 import json
 import os
 
-
 def get_voteview():
     memberurl = 'https://voteview.com/static/data/out/members/HS117_members.csv'
     cvoteurl = 'https://voteview.com/static/data/out/rollcalls/HS117_rollcalls.csv'
@@ -75,12 +74,12 @@ def merge_members(members_pp, members_vv):
     tokeep = ['title', 'short_title','first_name', 'middle_name', 'last_name', 'suffix',
               'congress', 'chamber', 'icpsr', 'state', 'district', 'at_large',
               'gender', 'party', 'date_of_birth', 'leadership_role',
-              'twitter_account', 'facebook_account', 'youtube_account', 
-              'url', 'rss_url', 
+              'twitter_account', 'facebook_account', 'youtube_account',
+              'url', 'rss_url',
               'seniority', 'next_election',
               'total_votes', 'missed_votes', 'total_present',
-              'office', 'phone', 'fax', 
-              'missed_votes_pct', 'votes_with_party_pct', 'votes_against_party_pct', 'nominate_dim1',  
+              'office', 'phone', 'fax',
+              'missed_votes_pct', 'votes_with_party_pct', 'votes_against_party_pct', 'nominate_dim1',
               'id', 'api_uri',
               'last_updated']
     members_total = members_total[tokeep]
@@ -89,9 +88,21 @@ def merge_members(members_pp, members_vv):
                                          'api_uri':'propublica_endpoint'}, axis=1)
     return members_total
     
-def get_bills_pp(propublica_token, useragent, email, 
-                 congress = '117', chamber = 'both', billtype = 'introduced', offset=0):
-    headers = {'X-API-Key': propublica_token, 
+def scrape_bill(url, email):
+    import time
+    from bs4 import BeautifulSoup
+    time.sleep(2)
+    r = requests.get(url, headers = {'User-Agent': get_useragent(), 'From': email})
+    myhtml = BeautifulSoup(r.text, 'html.parser')
+    try:
+        billtext = myhtml.find_all('pre')[0].text
+        return billtext
+    except:
+        return 'Bill text not yet available'
+    
+def get_bills_pp(propublica_token, useragent, email,
+                 congress='117', chamber='both', billtype='introduced', offset=0):
+    headers = {'X-API-Key': propublica_token,
               'User-Agent': useragent,
               'From': email}
     root = 'https://api.propublica.org'
@@ -101,4 +112,10 @@ def get_bills_pp(propublica_token, useragent, email,
     myjson = json.loads(r.text)
     num_results = myjson['results'][0]['num_results']
     bills = myjson['results'][0]['bills']
+    
     return bills, num_results
+    
+def add_bill_text(bill_list, email):
+    for b in bill_list:
+        b.update({'bill_text': scrape_bill(b['congressdotgov_url'] + '/text?format=txt', email)})
+    return bill_list
