@@ -17,7 +17,7 @@ services:
         volumes:
             - postgresdata:/var/lib/postgressql/data
         ports:
-            - "5432:5432"
+            - "5433:5432"
         networks:
             - dbnetwork
             

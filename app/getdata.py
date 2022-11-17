@@ -3,6 +3,10 @@ import numpy as np
 import requests
 import json
 import os
+import shutil
+from bs4 import BeautifulSoup
+import io 
+import zipfile 
 
 def get_voteview():
     memberurl = 'https://voteview.com/static/data/out/members/HS117_members.csv'
@@ -74,12 +78,12 @@ def merge_members(members_pp, members_vv):
     tokeep = ['title', 'short_title','first_name', 'middle_name', 'last_name', 'suffix',
               'congress', 'chamber', 'icpsr', 'state', 'district', 'at_large',
               'gender', 'party', 'date_of_birth', 'leadership_role',
-              'twitter_account', 'facebook_account', 'youtube_account',
-              'url', 'rss_url',
+              'twitter_account', 'facebook_account', 'youtube_account', 
+              'url', 'rss_url', 
               'seniority', 'next_election',
               'total_votes', 'missed_votes', 'total_present',
-              'office', 'phone', 'fax',
-              'missed_votes_pct', 'votes_with_party_pct', 'votes_against_party_pct', 'nominate_dim1',
+              'office', 'phone', 'fax', 
+              'missed_votes_pct', 'votes_with_party_pct', 'votes_against_party_pct', 'nominate_dim1',  
               'id', 'api_uri',
               'last_updated']
     members_total = members_total[tokeep]
@@ -87,18 +91,6 @@ def merge_members(members_pp, members_vv):
                                          'id':'propublica_id',
                                          'api_uri':'propublica_endpoint'}, axis=1)
     return members_total
-    
-def scrape_bill(url, email):
-    import time
-    from bs4 import BeautifulSoup
-    time.sleep(2)
-    r = requests.get(url, headers = {'User-Agent': get_useragent(), 'From': email})
-    myhtml = BeautifulSoup(r.text, 'html.parser')
-    try:
-        billtext = myhtml.find_all('pre')[0].text
-        return billtext
-    except:
-        return 'Bill text not yet available'
     
 def get_bills_pp(propublica_token, useragent, email,
                  congress='117', chamber='both', billtype='introduced', offset=0):
@@ -114,8 +106,85 @@ def get_bills_pp(propublica_token, useragent, email,
     bills = myjson['results'][0]['bills']
     
     return bills, num_results
+
+def download_govinfo(path='/contrans/billsdata', congress = ['117'], session = ['1','2']):
+    billtype = ['hconres','hjres','hr','hres','s','sconres','sjres','sres']
+    root = 'https://www.govinfo.gov/bulkdata/BILLS/'
+    urls = [root]
+    urls = [u + c + '/' + s + '/' + b + '/BILLS-' + c + '-' + s + '-' + b + '.zip'
+            for u in urls 
+            for c in congress 
+            for s in session
+            for b in billtype]
+    for u in urls:   
+        r = requests.get(u)
+        z = zipfile.ZipFile(io.BytesIO(r.content))
+        z.extractall(path)
+
+
+def get_bill_files(path='/contrans/billsdata', if_exists='ignore'):
+    if not os.path.exists(path):
+        os.makedirs(path)
+        download_govinfo(path)
+        return
+    if os.path.exists(path) and if_exists=='replace':
+        shutil.rmtree(path)
+        os.makedirs(path)
+        download_govinfo(path)
+        return
+    if os.path.exists(path) and if_exists=='ignore':
+        return
+    else:
+        return
     
-def add_bill_text(bill_list, email):
-    for b in bill_list:
-        b.update({'bill_text': scrape_bill(b['congressdotgov_url'] + '/text?format=txt', email)})
-    return bill_list
+def add_bill_text(bill, path='/contrans/billsdata'):
+    slug = bill['bill_slug']
+    
+    # Find the bill in /billsdata
+    try:
+        billfile = [f for f in os.listdir(path) if slug in f]
+        billfile = billfile[0]
+    except:
+        return
+    
+    # Load the file as string
+    with open(f"{path}/{billfile}") as f:
+        xml_data = f.read()
+    
+    # Parse the file with lxml and beautifulsoup
+    mysoup = BeautifulSoup(xml_data, features="xml")
+    
+    # Extract text
+    bill_text = [m.text for m in mysoup.find_all('text')]
+    bill_text = ' '.join(bill_text)
+    
+    # update json record
+    bill.update({'bill_text': bill_text})
+    
+def build_mongo_db(mongo_username, mongo_password, mongo_init_db, propublica_token, email):
+    
+    get_bill_files(if_exists='ignore')
+    
+    useragent = get_useragent()
+    
+    myclient = pymongo.MongoClient(f"mongodb://{mongo_username}:{mongo_password}@mongo:27017/{mongo_init_db}?authSource=admin")
+    
+    contrans_db = myclient['contrans']
+    
+    collist = contrans_db.list_collection_names()
+    if "bills" in collist:
+      contrans_db.bills.drop()
+
+    bills = contrans_db['bills']
+    
+    i = 0
+    while 1==1:
+        bills_list, num_results = getdata.get_bills_pp(propublica_token, useragent, email=email, offset=20*i)
+        if num_results == 0:
+            print('Done!')
+            break
+        print(f'Now getting bills {20*i + 1} through {20*(i+1)}')
+        for b in bills_list:
+            getdata.add_bill_text(b)
+        bills_insert = bills.insert_many(bills_list)
+        i += 1
