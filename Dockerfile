@@ -23,4 +23,4 @@ EXPOSE 27017
 
 CMD ["jupyter", "lab", "--ip=0.0.0.0", "--allow-root"]
 
-
+#CMD ["python", "/contrans/app/app.py"]
